@@ -1,0 +1,12 @@
+# Core libraries for data science and deep learning
+numpy
+pandas
+scipy
+matplotlib
+
+# Deep Learning Framework - choose one and comment out the other
+torch
+# tensorflow
+
+# Add other libraries as needed
+# e.g., jupyterlab
