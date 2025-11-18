@@ -58,7 +58,7 @@ aternions with normalization and antipodal fix.
     return quaternions
 if __name__ == "__main__":
     # Example usage: load the first file in the Scanpaths folder
-    data_path = "data/images/Scanpaths"
+    data_path = "data/Scanpaths"
     files = [f for f in os.listdir(data_path) if f.endswith(".txt")]
     if files:
         file_to_load = os.path.join(data_path, files[0])
