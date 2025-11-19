@@ -14,8 +14,9 @@ ArrayLike = Union[float, np.ndarray]
 LOG_4PI = math.log(4.0 * math.pi)
 LOG_2PI = math.log(2.0 * math.pi)
 
-KAPPA_SMALL: float = 1e-3
-KAPPA_LARGE: float = 50.0
+# IMPORTANT: Align these with LUT domain [0.01, 20.0]
+KAPPA_SMALL: float = 1e-2   # lower bound -> small-kappa below this
+KAPPA_LARGE: float = 20.0   # upper bound -> large-kappa above this
 KAPPA_MAX: float = 1e4
 
 # ---------------------------------------------------------------------------
@@ -28,8 +29,20 @@ _lut_A3_vals = None
 _lut_logc3_vals = None
 
 
+def _A3_small(kappa: np.ndarray) -> np.ndarray:
+    k = np.asarray(kappa, dtype=float)
+    k2 = k * k
+    return (k / 3.0) * (1.0 - k2 / 15.0 + 2.0 * k2 * k2 / 315.0)
+
+
+def _log_c3_small(kappa: np.ndarray) -> np.ndarray:
+    k = np.asarray(kappa, dtype=float)
+    k2 = k * k
+    return -LOG_4PI - k2 / 6.0 + (k2 * k2) / 180.0
+
+
 def _load_vmf_lut():
-    """Load the LUT only once into memory."""
+    """Load the LUT only once into memory and fix regime boundary continuity."""
     global _LUT_LOADED, _lut_kappa_grid, _lut_A3_vals, _lut_logc3_vals
     if _LUT_LOADED:
         return
@@ -37,20 +50,24 @@ def _load_vmf_lut():
     lut_path = pathlib.Path(__file__).resolve().parent / "vmf_lut_midk.npz"
     data = np.load(lut_path)
 
-    # Use the actual keys stored inside your LUT file
     _lut_kappa_grid = data["kappa_grid"].astype(np.float64)
     _lut_A3_vals    = data["A3_vals"].astype(np.float64)
     _lut_logc3_vals = data["log_c3_vals"].astype(np.float64)
+
+    # ---- Boundary continuity fix at KAPPA_SMALL (which is 0.01) ----
+    idx = np.argmin(np.abs(_lut_kappa_grid - KAPPA_SMALL))
+    _lut_A3_vals[idx]    = float(_A3_small(KAPPA_SMALL))
+    _lut_logc3_vals[idx] = float(_log_c3_small(KAPPA_SMALL))
 
     _LUT_LOADED = True
 
 
 # ---------------------------------------------------------------------------
-# Pure NumPy interpolation (fastest & most portable)
+# Pure NumPy interpolation (fast, stable, portable)
 # ---------------------------------------------------------------------------
 
 def _interp_numpy(x: np.ndarray, grid: np.ndarray, values: np.ndarray) -> np.ndarray:
-    """Vectorized 1D linear interpolation (pure NumPy, very fast)."""
+    """Vectorized 1D linear interpolation (pure NumPy)."""
     x = np.asarray(x, dtype=np.float64)
     idx = np.searchsorted(grid, x)
     idx = np.clip(idx, 1, grid.size - 1)
@@ -65,44 +82,31 @@ def _interp_numpy(x: np.ndarray, grid: np.ndarray, values: np.ndarray) -> np.nda
 
 
 # ---------------------------------------------------------------------------
-# Small-kappa Taylor series
-# ---------------------------------------------------------------------------
-
-def _A3_small(kappa: np.ndarray) -> np.ndarray:
-    k = np.asarray(kappa, dtype=float)
-    k2 = k * k
-    return (k / 3.0) * (1.0 - k2 / 15.0 + 2.0 * k2 * k2 / 315.0)
-
-
-def _log_c3_small(kappa: np.ndarray) -> np.ndarray:
-    k = np.asarray(kappa, dtype=float)
-    k2 = k * k
-    return -LOG_4PI - k2 / 6.0 + (k2 * k2) / 180.0
-
-
-# ---------------------------------------------------------------------------
-# Mid-kappa using LUT interpolation
+# Mid-kappa via LUT
 # ---------------------------------------------------------------------------
 
 def _A3_mid_lut(kappa):
     _load_vmf_lut()
-    k = np.asarray(kappa, dtype=np.float64)
-    return _interp_numpy(k, _lut_kappa_grid, _lut_A3_vals)
+    k = np.asarray(kappa, dtype=float)
+    A = _interp_numpy(k, _lut_kappa_grid, _lut_A3_vals)
+    # Ensure A3 ∈ [0, 1) to satisfy theory and tests
+    return np.minimum(A, 1.0 - 1e-12)
 
 
 def _log_c3_mid_lut(kappa):
     _load_vmf_lut()
-    k = np.asarray(kappa, dtype=np.float64)
+    k = np.asarray(kappa, dtype=float)
     return _interp_numpy(k, _lut_kappa_grid, _lut_logc3_vals)
 
 
 # ---------------------------------------------------------------------------
-# Large-kappa asymptotic formulas
+# Large-kappa asymptotics
 # ---------------------------------------------------------------------------
 
 def _A3_large(kappa: np.ndarray) -> np.ndarray:
     k = np.asarray(kappa, dtype=float)
-    return 1.0 - 1.0 / k
+    A = 1.0 - 1.0 / k
+    return np.minimum(A, 1.0 - 1e-12)
 
 
 def _log_c3_large(kappa: np.ndarray) -> np.ndarray:
@@ -111,7 +115,7 @@ def _log_c3_large(kappa: np.ndarray) -> np.ndarray:
 
 
 # ---------------------------------------------------------------------------
-# Derivative A3'(kappa)
+# Derivative A3' (for invert_A3)
 # ---------------------------------------------------------------------------
 
 def _A3_prime_small(kappa: np.ndarray) -> np.ndarray:
@@ -133,7 +137,7 @@ def _A3_prime_large(kappa: np.ndarray) -> np.ndarray:
 
 def compute_A3_prime(kappa: ArrayLike) -> ArrayLike:
     k = np.asarray(kappa, dtype=float)
-    if np.any(k < 0.0):
+    if np.any(k < 0):
         raise ValueError("kappa must be non-negative")
 
     scalar = (k.ndim == 0)
@@ -141,7 +145,6 @@ def compute_A3_prime(kappa: ArrayLike) -> ArrayLike:
         k = k[None]
 
     out = np.empty_like(k)
-
     mask_small = k < KAPPA_SMALL
     mask_large = k > KAPPA_LARGE
     mask_mid   = ~(mask_small | mask_large)
@@ -157,12 +160,12 @@ def compute_A3_prime(kappa: ArrayLike) -> ArrayLike:
 
 
 # ---------------------------------------------------------------------------
-# Public compute_A3 and compute_log_c3 (with regimes + LUT)
+# Public A3 & log_c3 with regime logic + LUT
 # ---------------------------------------------------------------------------
 
 def compute_A3(kappa: ArrayLike) -> ArrayLike:
     k = np.asarray(kappa, dtype=float)
-    if np.any(k < 0.0):
+    if np.any(k < 0):
         raise ValueError("kappa must be non-negative")
 
     scalar = (k.ndim == 0)
@@ -170,7 +173,6 @@ def compute_A3(kappa: ArrayLike) -> ArrayLike:
         k = k[None]
 
     out = np.empty_like(k)
-
     mask_small = k < KAPPA_SMALL
     mask_large = k > KAPPA_LARGE
     mask_mid   = ~(mask_small | mask_large)
@@ -182,12 +184,14 @@ def compute_A3(kappa: ArrayLike) -> ArrayLike:
     if np.any(mask_large):
         out[mask_large] = _A3_large(k[mask_large])
 
+    out = np.minimum(out, 1.0 - 1e-12)  # safety clamp
+
     return float(out[0]) if scalar else out
 
 
 def compute_log_c3(kappa: ArrayLike) -> ArrayLike:
     k = np.asarray(kappa, dtype=float)
-    if np.any(k < 0.0):
+    if np.any(k < 0):
         raise ValueError("kappa must be non-negative")
 
     scalar = (k.ndim == 0)
@@ -195,7 +199,6 @@ def compute_log_c3(kappa: ArrayLike) -> ArrayLike:
         k = k[None]
 
     out = np.empty_like(k)
-
     mask_small = k < KAPPA_SMALL
     mask_large = k > KAPPA_LARGE
     mask_mid   = ~(mask_small | mask_large)
@@ -211,7 +214,7 @@ def compute_log_c3(kappa: ArrayLike) -> ArrayLike:
 
 
 # ---------------------------------------------------------------------------
-# Invert A3
+# Invert A3 (Newton + safeguard)
 # ---------------------------------------------------------------------------
 
 def invert_A3(r: ArrayLike,
@@ -229,7 +232,6 @@ def invert_A3(r: ArrayLike,
         r_clamped = r_clamped[None]
 
     out = np.zeros_like(r_clamped)
-
     mask_small = r_clamped <= r_min
     mask_pos   = ~mask_small
 
