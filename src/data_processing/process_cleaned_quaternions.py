@@ -178,26 +178,6 @@ def load_cleaned_quaternions(csv_path):
 
     return quats, timestamps
 
-
-def compute_kinematics(rot_uniform):
-    """
-    Given a Rotation object over time, compute:
-
-    - x_t: forward direction in world space (3D unit vector)
-    - omega_t: angular velocity between successive frames (as rotation vectors)
-    """
-    forward = np.array([0.0, 0.0, 1.0])
-    x_t = rot_uniform.apply(forward)
-
-    # Angular velocity via relative rotations between frames
-    R1 = rot_uniform[:-1]
-    R2 = rot_uniform[1:]
-    delta_rot = R1.inv() * R2
-    omega_t = delta_rot.as_rotvec()
-
-    return x_t, omega_t
-
-
 def main():
     csv_path = "cleaned_quaternions.csv"
 
