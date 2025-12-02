@@ -1,4 +1,3 @@
-# src/sae_core/streaming_estimator.py
 
 from __future__ import annotations
 
@@ -106,4 +105,3 @@ class StreamingVMFState:
         kappa_s = float(invert_A3(r_s))
 
         return mu_s, kappa_s, r_s
-
