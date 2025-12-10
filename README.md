@@ -84,7 +84,6 @@ SAE Viewport Prediction Folder/
 
 **Mac/Linux/Windows:**
 ```bash
-python scripts/make_npy_from_cleaned.py
 python scripts/process_all_scanpaths.py
 python scripts/make_npy_from_cleaned.py
 python scripts/generate_vmf_lut.py
