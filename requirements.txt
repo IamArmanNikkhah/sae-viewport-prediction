@@ -9,4 +9,6 @@ torch
 # tensorflow
 
 # Add other libraries as needed
+pytest
+black
 # e.g., jupyterlab
