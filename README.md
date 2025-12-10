@@ -72,7 +72,7 @@ SAE Viewport Prediction Folder/
     ├── data
     │   └── H                # Extracted folder from Image_H.7z
     │     └── SalMaps
-    │   └── Scanpaths        # Move this folder out of H
+    │   └── Scanpaths        # Move this folder out of H and into data
     ├── tests
     ├── scripts
     └── .vscode
